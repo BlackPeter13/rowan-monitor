@@ -3,80 +3,134 @@
 <head>
   <meta charset="UTF-8">
   <title>Rowan RWN Mint Monitor</title>
-  <script src="https://cdn.jsdelivr.net/npm/web3@1.10.0/dist/web3.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; background: #f9f9f9; }
     #status { margin-top: 20px; padding: 10px; background: #eee; border-radius: 10px; }
-    .warning { background-color: #ffe0e0; color: #a00; font-weight: bold; }
+    .warning { background-color: #ffe0e0; color: #a00; font-weight: bold; animation: none; }
+    .warning.blink { animation: blink 1s infinite; }
     .ok { background-color: #e0ffe0; color: #080; font-weight: bold; }
+    .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 10px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    @keyframes blink { 50% { opacity: 0; } }
   </style>
 </head>
 <body>
   <h2>Rowan Energy - RWN Live Mint Monitor</h2>
   <p>Watching the total supply for suspicious increases...</p>
 
-  <div id="status" class="ok">Loading...</div>
+  <div id="status" class="ok"><span class="spinner"></span>Loading...</div>
   <div style="margin-top: 20px;">
     <h3>History (latest first):</h3>
     <ul id="history"></ul>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/web3@1.10.0/dist/web3.min.js"></script>
   <script>
-    const rpcURL = "http://3.19.248.157:8504";
-    const contractAddress = "0x4dAc52A00cEd3Dd62eB54b13E47d03D624ca72e1";
+    window.onload = function() {
+      const rpcURL = "http://3.19.248.157:8504";
+      const contractAddress = web3.utils.toChecksumAddress("0x4dAc52A00cEd3Dd62eB54b13E47d03D624ca72e1");
 
-    const web3 = new Web3(new Web3.providers.HttpProvider(rpcURL));
+      const web3Instance = new Web3(new Web3.providers.HttpProvider(rpcURL));
 
-    const abi = [
-      { "constant": true, "inputs": [], "name": "totalSupply", "outputs": [{"name": "", "type": "uint256"}], "type": "function" },
-      { "constant": true, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function" }
-    ];
+      const abi = [
+        { "constant": true, "inputs": [], "name": "totalSupply", "outputs": [{"name": "", "type": "uint256"}], "type": "function" },
+        { "constant": true, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}] }
+      ];
 
-    const contract = new web3.eth.Contract(abi, contractAddress);
+      const contract = new web3Instance.eth.Contract(abi, contractAddress);
 
-    let lastSupply = null;
+      let lastSupply = null;
+      let retryCount = 0;
+      const maxRetries = 3;
+      let offlineTimer = null;
 
-    async function checkSupply() {
-      try {
-        const supplyRaw = await contract.methods.totalSupply().call();
-        const decimals = await contract.methods.decimals().call();
-        const supply = supplyRaw / (10 ** decimals);
+      async function pingRPC() {
+        try {
+          await web3Instance.eth.net.isListening();
+          console.log("✅ RPC Connection Successful");
+        } catch (e) {
+          const statusDiv = document.getElementById('status');
+          statusDiv.className = 'warning';
+          statusDiv.textContent = `❌ Cannot connect to RPC server: ${e.message}`;
+          if (!offlineTimer) startOfflineBlink();
+          throw new Error("Cannot connect to RPC");
+        }
+      }
 
+      function startOfflineBlink() {
+        offlineTimer = setTimeout(() => {
+          const statusDiv = document.getElementById('status');
+          statusDiv.classList.add('blink');
+        }, 60000); // 60 seconds
+      }
+
+      function stopOfflineBlink() {
+        if (offlineTimer) {
+          clearTimeout(offlineTimer);
+          offlineTimer = null;
+        }
         const statusDiv = document.getElementById('status');
-        const historyList = document.getElementById('history');
+        statusDiv.classList.remove('blink');
+      }
 
-        const now = new Date().toLocaleTimeString();
+      async function checkSupply() {
+        const statusDiv = document.getElementById('status');
+        statusDiv.innerHTML = '<span class="spinner"></span>Fetching latest supply...';
 
-        if (lastSupply !== null) {
-          const diff = supply - lastSupply;
-          const diffPercent = (diff / lastSupply) * 100;
+        try {
+          await pingRPC();
+          const supplyRaw = await contract.methods.totalSupply().call();
+          const decimals = await contract.methods.decimals().call();
 
-          if (diff > 0.01) { // If more than 0.01% increase
-            statusDiv.className = 'warning';
-            statusDiv.textContent = `⚠️ WARNING: Supply increased by ${diff.toFixed(2)} RWN (${diffPercent.toFixed(4)}%) at ${now}`;
+          const supply = supplyRaw / (10 ** decimals);
+          const historyList = document.getElementById('history');
+          const now = new Date().toLocaleTimeString();
+
+          if (lastSupply !== null) {
+            const diff = supply - lastSupply;
+            const diffPercent = (diff / lastSupply) * 100;
+
+            if (diff > 0.01) {
+              statusDiv.className = 'warning';
+              statusDiv.textContent = `⚠️ WARNING: Supply increased by ${diff.toFixed(2)} RWN (${diffPercent.toFixed(4)}%) at ${now}`;
+            } else {
+              statusDiv.className = 'ok';
+              statusDiv.textContent = `✅ OK: No major supply change. Total: ${supply.toLocaleString()} RWN`;
+            }
           } else {
             statusDiv.className = 'ok';
-            statusDiv.textContent = `✅ OK: No major supply change. Total: ${supply.toLocaleString()} RWN`;
+            statusDiv.textContent = `✅ Monitoring started. Current supply: ${supply.toLocaleString()} RWN`;
           }
-        } else {
-          statusDiv.className = 'ok';
-          statusDiv.textContent = `✅ Monitoring started. Current supply: ${supply.toLocaleString()} RWN`;
+
+          const li = document.createElement('li');
+          li.textContent = `${now}: ${supply.toLocaleString()} RWN`;
+          historyList.insertBefore(li, historyList.firstChild);
+
+          while (historyList.children.length > 20) {
+            historyList.removeChild(historyList.lastChild);
+          }
+
+          lastSupply = supply;
+          retryCount = 0;
+          stopOfflineBlink();
+
+        } catch (e) {
+          statusDiv.className = 'warning';
+          statusDiv.textContent = `Error fetching data: ${e.message} (Retry ${retryCount}/${maxRetries})`;
+
+          if (retryCount < maxRetries) {
+            retryCount++;
+            setTimeout(checkSupply, 5000);
+          } else {
+            console.error('Max retries reached. Stopping retries until next interval.');
+            retryCount = 0;
+          }
         }
-
-        const li = document.createElement('li');
-        li.textContent = `${now}: ${supply.toLocaleString()} RWN`;
-        historyList.insertBefore(li, historyList.firstChild);
-
-        lastSupply = supply;
-      } catch (e) {
-        const statusDiv = document.getElementById('status');
-        statusDiv.className = 'warning';
-        statusDiv.textContent = `Error fetching data: ${e.message}`;
       }
-    }
 
-    checkSupply(); // First run
-    setInterval(checkSupply, 15000); // Repeat every 15 seconds
+      checkSupply();
+      setInterval(checkSupply, 15000);
+    }
   </script>
 </body>
 </html>

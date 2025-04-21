@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Rowan RWN Mint Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/web3@1.10.0/dist/web3.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f9f9f9; }
+    #status { margin-top: 20px; padding: 10px; background: #eee; border-radius: 10px; }
+    .warning { background-color: #ffe0e0; color: #a00; font-weight: bold; }
+    .ok { background-color: #e0ffe0; color: #080; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Rowan Energy - RWN Live Mint Monitor</h2>
+  <p>Watching the total supply for suspicious increases...</p>
+
+  <div id="status" class="ok">Loading...</div>
+  <div style="margin-top: 20px;">
+    <h3>History (latest first):</h3>
+    <ul id="history"></ul>
+  </div>
+
+  <script>
+    const rpcURL = "http://3.19.248.157:8504";
+    const contractAddress = "0x4dAc52A00cEd3Dd62eB54b13E47d03D624ca72e1";
+
+    const web3 = new Web3(new Web3.providers.HttpProvider(rpcURL));
+
+    const abi = [
+      { "constant": true, "inputs": [], "name": "totalSupply", "outputs": [{"name": "", "type": "uint256"}], "type": "function" },
+      { "constant": true, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function" }
+    ];
+
+    const contract = new web3.eth.Contract(abi, contractAddress);
+
+    let lastSupply = null;
+
+    async function checkSupply() {
+      try {
+        const supplyRaw = await contract.methods.totalSupply().call();
+        const decimals = await contract.methods.decimals().call();
+        const supply = supplyRaw / (10 ** decimals);
+
+        const statusDiv = document.getElementById('status');
+        const historyList = document.getElementById('history');
+
+        const now = new Date().toLocaleTimeString();
+
+        if (lastSupply !== null) {
+          const diff = supply - lastSupply;
+          const diffPercent = (diff / lastSupply) * 100;
+
+          if (diff > 0.01) { // If more than 0.01% increase
+            statusDiv.className = 'warning';
+            statusDiv.textContent = `⚠️ WARNING: Supply increased by ${diff.toFixed(2)} RWN (${diffPercent.toFixed(4)}%) at ${now}`;
+          } else {
+            statusDiv.className = 'ok';
+            statusDiv.textContent = `✅ OK: No major supply change. Total: ${supply.toLocaleString()} RWN`;
+          }
+        } else {
+          statusDiv.className = 'ok';
+          statusDiv.textContent = `✅ Monitoring started. Current supply: ${supply.toLocaleString()} RWN`;
+        }
+
+        const li = document.createElement('li');
+        li.textContent = `${now}: ${supply.toLocaleString()} RWN`;
+        historyList.insertBefore(li, historyList.firstChild);
+
+        lastSupply = supply;
+      } catch (e) {
+        const statusDiv = document.getElementById('status');
+        statusDiv.className = 'warning';
+        statusDiv.textContent = `Error fetching data: ${e.message}`;
+      }
+    }
+
+    checkSupply(); // First run
+    setInterval(checkSupply, 15000); // Repeat every 15 seconds
+  </script>
+</body>
+</html>

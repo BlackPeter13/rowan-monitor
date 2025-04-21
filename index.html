@@ -12,6 +12,7 @@
     .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 10px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     @keyframes blink { 50% { opacity: 0; } }
+    #logs { background: #fff; padding: 10px; margin-top: 20px; height: 150px; overflow-y: scroll; border: 1px solid #ccc; border-radius: 8px; font-family: monospace; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -23,6 +24,8 @@
     <h3>History (latest first):</h3>
     <ul id="history"></ul>
   </div>
+
+  <div id="logs"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/web3@1.10.0/dist/web3.min.js"></script>
   <script>
@@ -44,14 +47,21 @@
       const maxRetries = 3;
       let offlineTimer = null;
 
+      function log(message) {
+        const logs = document.getElementById('logs');
+        const now = new Date().toLocaleTimeString();
+        logs.innerHTML = `<div>[${now}] ${message}</div>` + logs.innerHTML;
+      }
+
       async function pingRPC() {
         try {
           await web3Instance.eth.net.isListening();
-          console.log("✅ RPC Connection Successful");
+          log("✅ RPC Connection Successful");
         } catch (e) {
           const statusDiv = document.getElementById('status');
           statusDiv.className = 'warning';
           statusDiv.textContent = `❌ Cannot connect to RPC server: ${e.message}`;
+          log(`❌ RPC Error: ${e.message}`);
           if (!offlineTimer) startOfflineBlink();
           throw new Error("Cannot connect to RPC");
         }
@@ -61,7 +71,8 @@
         offlineTimer = setTimeout(() => {
           const statusDiv = document.getElementById('status');
           statusDiv.classList.add('blink');
-        }, 60000); // 60 seconds
+          log("⚠️ RPC offline for over 60 seconds! Blinking started.");
+        }, 60000);
       }
 
       function stopOfflineBlink() {
@@ -76,6 +87,7 @@
       async function checkSupply() {
         const statusDiv = document.getElementById('status');
         statusDiv.innerHTML = '<span class="spinner"></span>Fetching latest supply...';
+        log("🔄 Fetching total supply...");
 
         try {
           await pingRPC();
@@ -93,13 +105,16 @@
             if (diff > 0.01) {
               statusDiv.className = 'warning';
               statusDiv.textContent = `⚠️ WARNING: Supply increased by ${diff.toFixed(2)} RWN (${diffPercent.toFixed(4)}%) at ${now}`;
+              log(`⚠️ Supply increased by ${diff.toFixed(2)} RWN (${diffPercent.toFixed(4)}%)`);
             } else {
               statusDiv.className = 'ok';
               statusDiv.textContent = `✅ OK: No major supply change. Total: ${supply.toLocaleString()} RWN`;
+              log(`✅ Supply stable: ${supply.toLocaleString()} RWN`);
             }
           } else {
             statusDiv.className = 'ok';
             statusDiv.textContent = `✅ Monitoring started. Current supply: ${supply.toLocaleString()} RWN`;
+            log(`✅ Initial supply: ${supply.toLocaleString()} RWN`);
           }
 
           const li = document.createElement('li');
@@ -117,6 +132,7 @@
         } catch (e) {
           statusDiv.className = 'warning';
           statusDiv.textContent = `Error fetching data: ${e.message} (Retry ${retryCount}/${maxRetries})`;
+          log(`❌ Error fetching supply: ${e.message}`);
 
           if (retryCount < maxRetries) {
             retryCount++;
